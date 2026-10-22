@@ -96,36 +96,78 @@ jobs:
           name: coverage-report
           path: coverage.xml
 
-  # ===================== Ringkasan Stage 1 (bahan Security Score) =====================
-  stage1-summary:
-    name: Stage 1 Summary
+  # ===================== STAGE 2: SECURITY GATE =====================
+  security-gate:
+    name: Security Score Gate
     runs-on: ubuntu-latest
     needs: [gitleaks, semgrep, bandit, hadolint, pylint, pip-audit, pytest]
     if: always()
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
-      - name: Hitung skor dan tampilkan ringkasan
+      - name: Hitung skor, komentari PR, putuskan lolos atau gagal
+        uses: actions/github-script@v7
         env:
-          R_GITLEAKS: ${{ needs.gitleaks.result }}
-          R_SEMGREP: ${{ needs.semgrep.result }}
-          R_BANDIT: ${{ needs.bandit.result }}
-          R_HADOLINT: ${{ needs.hadolint.result }}
-          R_PYLINT: ${{ needs.pylint.result }}
-          R_PIPAUDIT: ${{ needs.pip-audit.result }}
-          R_PYTEST: ${{ needs.pytest.result }}
-        run: |
-          passed=0; total=0
-          {
-            echo "## Stage 1 - Shift-Left"
-            echo "| Job | Hasil |"
-            echo "|---|---|"
-          } >> "$GITHUB_STEP_SUMMARY"
-          for pair in "Gitleaks:$R_GITLEAKS" "Semgrep:$R_SEMGREP" "Bandit:$R_BANDIT" \
-                      "Hadolint:$R_HADOLINT" "Pylint:$R_PYLINT" "pip-audit:$R_PIPAUDIT" "pytest:$R_PYTEST"; do
-            name="${pair%%:*}"; res="${pair##*:}"; total=$((total+1))
-            if [ "$res" = "success" ]; then passed=$((passed+1)); icon="LOLOS"; else icon="GAGAL"; fi
-            echo "| $name | $icon |" >> "$GITHUB_STEP_SUMMARY"
-          done
-          score=$((passed*100/total))
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Skor Stage 1: $score / 100**" >> "$GITHUB_STEP_SUMMARY"
-          [ "$passed" -eq "$total" ] || exit 1
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        with:
+          script: |
+            const needs = JSON.parse(process.env.NEEDS_JSON);
+            const THRESHOLD = 80;
+            // [id job, nama, bobot, kritis (gagal = langsung blokir)]
+            const checks = [
+              ['gitleaks',  'Gitleaks (Secret Scan)',     20, true],
+              ['semgrep',   'Semgrep (SAST)',             15, false],
+              ['bandit',    'Bandit (SAST Python)',       15, false],
+              ['pip-audit', 'pip-audit (CVE Dependency)', 15, false],
+              ['pytest',    'pytest (Coverage >= 80%)',   15, false],
+              ['pylint',    'Pylint (Skor >= 9.0)',       10, false],
+              ['hadolint',  'Hadolint (Dockerfile)',      10, false],
+            ];
+            let score = 0;
+            let criticalFail = false;
+            const rows = checks.map(([id, name, weight, critical]) => {
+              const ok = needs[id].result === 'success';
+              if (ok) score += weight;
+              if (!ok && critical) criticalFail = true;
+              const note = critical ? ' (kritis)' : '';
+              return `| ${name}${note} | ${weight} | ${ok ? 'LOLOS' : 'GAGAL'} | ${ok ? weight : 0} |`;
+            });
+            const pass = score >= THRESHOLD && !criticalFail;
+            const verdict = pass
+              ? `LOLOS: skor ${score}/100 (minimal ${THRESHOLD})`
+              : `DIBLOKIR: skor ${score}/100` + (criticalFail ? ' dan secret bocor terdeteksi' : ` (minimal ${THRESHOLD})`);
+            const body = [
+              '<!-- security-score-bot -->',
+              '## Security Score Bot',
+              '',
+              `**${verdict}**`,
+              '',
+              '| Pemeriksaan | Bobot | Hasil | Poin |',
+              '|---|---|---|---|',
+              ...rows,
+              '',
+              `Commit: \`${context.sha.slice(0, 7)}\``,
+            ].join('\n');
+
+            await core.summary.addRaw(body, true).write();
+
+            if (context.eventName === 'pull_request') {
+              try {
+                const { owner, repo } = context.repo;
+                const issue_number = context.payload.pull_request.number;
+                const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number });
+                const old = comments.find(c => c.body && c.body.includes('<!-- security-score-bot -->'));
+                if (old) {
+                  await github.rest.issues.updateComment({ owner, repo, comment_id: old.id, body });
+                } else {
+                  await github.rest.issues.createComment({ owner, repo, issue_number, body });
+                }
+              } catch (err) {
+                core.warning(`Tidak bisa mengomentari PR: ${err.message}`);
+              }
+            }
+
+            if (!pass) {
+              core.setFailed(verdict);
+            }
