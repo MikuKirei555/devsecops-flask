@@ -210,8 +210,9 @@ jobs:
           path: /tmp
       - run: docker load -i /tmp/image.tar
       - name: Scan image (gagal jika ada CRITICAL)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
+          version: v0.69.3
           image-ref: todo-app:${{ github.sha }}
           severity: CRITICAL
           ignore-unfixed: true
