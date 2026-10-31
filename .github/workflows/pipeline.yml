@@ -262,7 +262,9 @@ jobs:
         run: |
           IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
           docker tag "todo-app:${GITHUB_SHA}" "${IMAGE}:${GITHUB_SHA}"
-          docker push "${IMAGE}:${GITHUB_SHA}"
-          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "${IMAGE}:${GITHUB_SHA}")
+          docker push "${IMAGE}:${GITHUB_SHA}" | tee push.log
+          HASH=$(grep -oE 'digest: sha256:[a-f0-9]{64}' push.log | awk '{print $2}')
+          test -n "${HASH}"
+          DIGEST="${IMAGE}@${HASH}"
           cosign sign --yes "${DIGEST}"
           echo "Image bertanda tangan: ${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
