@@ -378,7 +378,7 @@ jobs:
         id: health
         run: |
           for i in $(seq 1 10); do
-            if curl -fsS "http://localhost:8080/health-rusak"; then
+            if curl -fsS "http://localhost:8080/health"; then
               echo "Production sehat." >> "$GITHUB_STEP_SUMMARY"; exit 0
             fi
             sleep 3
