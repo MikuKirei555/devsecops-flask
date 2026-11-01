@@ -269,9 +269,10 @@ jobs:
           cosign sign --yes "${DIGEST}"
           echo "Image bertanda tangan: ${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
 
-  # ===================== STAGE 4: DEPLOY AMAN =====================
-  # Hanya untuk push ke main. Jika secrets VM belum diisi, Stage 4 dilewati
-  # (pipeline tetap hijau).
+  # ===================== STAGE 4: DEPLOY AMAN (self-hosted runner di VM) =====================
+  # Hanya untuk push ke main. Dinyalakan lewat variabel repo STAGE4_ENABLED=true
+  # (Settings -> Secrets and variables -> Actions -> Variables). Jika belum diisi,
+  # Stage 4 dilewati dan pipeline tetap hijau.
   stage4-precheck:
     name: Cek Kesiapan VM
     runs-on: ubuntu-latest
@@ -282,31 +283,25 @@ jobs:
     steps:
       - id: check
         env:
-          VM_HOST: ${{ secrets.VM_HOST }}
-          VM_USER: ${{ secrets.VM_USER }}
-          VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+          ENABLED: ${{ vars.STAGE4_ENABLED }}
         run: |
-          if [ -n "$VM_HOST" ] && [ -n "$VM_USER" ] && [ -n "$VM_SSH_KEY" ]; then
+          if [ "$ENABLED" = "true" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
-            echo "VM siap, Stage 4 dijalankan." >> "$GITHUB_STEP_SUMMARY"
+            echo "Stage 4 aktif, deploy dijalankan di VM lewat self-hosted runner." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Secrets VM belum lengkap, Stage 4 dilewati." >> "$GITHUB_STEP_SUMMARY"
+            echo "STAGE4_ENABLED belum true, Stage 4 dilewati." >> "$GITHUB_STEP_SUMMARY"
           fi
 
   deploy-staging:
     name: Deploy Staging
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, deploy]
     needs: [stage4-precheck]
     if: needs.stage4-precheck.outputs.ready == 'true'
     environment: staging
     permissions:
       contents: read
       packages: read
-    env:
-      VM_HOST: ${{ secrets.VM_HOST }}
-      VM_USER: ${{ secrets.VM_USER }}
-      VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
     steps:
       - uses: sigstore/cosign-installer@v3
       - name: Verifikasi tanda tangan image (Cosign)
@@ -317,30 +312,20 @@ jobs:
             --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/pipeline.yml@refs/heads/main$" \
             > /dev/null
           echo "Tanda tangan image terverifikasi." >> "$GITHUB_STEP_SUMMARY"
-      - name: Siapkan SSH
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$VM_SSH_KEY" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          ssh-keyscan -H "$VM_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-      - name: Login registry di VM
+      - name: Login registry
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          printf '%s' "$GH_TOKEN" | ssh -i ~/.ssh/id_deploy -o StrictHostKeyChecking=yes \
-            "$VM_USER@$VM_HOST" "docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Deploy container staging (port 8081)
         run: |
           IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}"
-          ssh -i ~/.ssh/id_deploy "$VM_USER@$VM_HOST" "
-            docker pull '${IMAGE}' &&
-            (docker rm -f todo-staging >/dev/null 2>&1 || true) &&
-            docker run -d --name todo-staging --restart unless-stopped -p 8081:5000 '${IMAGE}'
-          "
+          docker pull "${IMAGE}"
+          docker rm -f todo-staging >/dev/null 2>&1 || true
+          docker run -d --name todo-staging --restart unless-stopped -p 8081:5000 "${IMAGE}"
       - name: Health check staging
         run: |
           for i in $(seq 1 10); do
-            if curl -fsS "http://${VM_HOST}:8081/health"; then
+            if curl -fsS "http://localhost:8081/health"; then
               echo "Staging sehat." >> "$GITHUB_STEP_SUMMARY"; exit 0
             fi
             sleep 3
@@ -349,16 +334,14 @@ jobs:
 
   zap-dast:
     name: OWASP ZAP (DAST Staging)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, deploy]
     needs: [deploy-staging]
     steps:
       - name: Scan baseline ke staging
-        env:
-          VM_HOST: ${{ secrets.VM_HOST }}
         run: |
           mkdir -p zap-out && chmod 777 zap-out
-          docker run --rm -v "$(pwd)/zap-out:/zap/wrk/:rw" -t ghcr.io/zaproxy/zaproxy:stable \
-            zap-baseline.py -t "http://${VM_HOST}:8081" -r zap-report.html -I
+          docker run --rm --network host -v "$(pwd)/zap-out:/zap/wrk/:rw" -t ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t "http://localhost:8081" -r zap-report.html -I
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -367,50 +350,35 @@ jobs:
 
   deploy-production:
     name: Deploy Production
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, deploy]
     needs: [zap-dast]
     # Menunggu persetujuan manual (required reviewers pada Environment "production")
     environment: production
     permissions:
       contents: read
       packages: read
-    env:
-      VM_HOST: ${{ secrets.VM_HOST }}
-      VM_USER: ${{ secrets.VM_USER }}
-      VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
     steps:
-      - name: Siapkan SSH
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$VM_SSH_KEY" > ~/.ssh/id_deploy
-          chmod 600 ~/.ssh/id_deploy
-          ssh-keyscan -H "$VM_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-      - name: Login registry di VM
+      - name: Login registry
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          printf '%s' "$GH_TOKEN" | ssh -i ~/.ssh/id_deploy \
-            "$VM_USER@$VM_HOST" "docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Catat image production saat ini (untuk rollback)
         id: prev
         run: |
-          PREV=$(ssh -i ~/.ssh/id_deploy "$VM_USER@$VM_HOST" \
-            "docker inspect --format='{{.Config.Image}}' todo-prod 2>/dev/null || true")
+          PREV=$(docker inspect --format='{{.Config.Image}}' todo-prod 2>/dev/null || true)
           echo "image=${PREV}" >> "$GITHUB_OUTPUT"
           echo "Image sebelumnya: ${PREV:-tidak ada}" >> "$GITHUB_STEP_SUMMARY"
       - name: Deploy container production (port 8080)
         run: |
           IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}"
-          ssh -i ~/.ssh/id_deploy "$VM_USER@$VM_HOST" "
-            docker pull '${IMAGE}' &&
-            (docker rm -f todo-prod >/dev/null 2>&1 || true) &&
-            docker run -d --name todo-prod --restart unless-stopped -p 8080:5000 '${IMAGE}'
-          "
+          docker pull "${IMAGE}"
+          docker rm -f todo-prod >/dev/null 2>&1 || true
+          docker run -d --name todo-prod --restart unless-stopped -p 8080:5000 "${IMAGE}"
       - name: Health check production
         id: health
         run: |
           for i in $(seq 1 10); do
-            if curl -fsS "http://${VM_HOST}:8080/health"; then
+            if curl -fsS "http://localhost:8080/health"; then
               echo "Production sehat." >> "$GITHUB_STEP_SUMMARY"; exit 0
             fi
             sleep 3
@@ -421,14 +389,11 @@ jobs:
         env:
           PREV_IMAGE: ${{ steps.prev.outputs.image }}
         run: |
+          docker rm -f todo-prod >/dev/null 2>&1 || true
           if [ -n "$PREV_IMAGE" ]; then
-            ssh -i ~/.ssh/id_deploy "$VM_USER@$VM_HOST" "
-              (docker rm -f todo-prod >/dev/null 2>&1 || true) &&
-              docker run -d --name todo-prod --restart unless-stopped -p 8080:5000 '${PREV_IMAGE}'
-            "
+            docker run -d --name todo-prod --restart unless-stopped -p 8080:5000 "${PREV_IMAGE}"
             echo "ROLLBACK ke ${PREV_IMAGE}" >> "$GITHUB_STEP_SUMMARY"
           else
-            ssh -i ~/.ssh/id_deploy "$VM_USER@$VM_HOST" "docker rm -f todo-prod >/dev/null 2>&1 || true"
             echo "Tidak ada image sebelumnya, container production dihentikan." >> "$GITHUB_STEP_SUMMARY"
           fi
 
