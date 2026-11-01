@@ -304,6 +304,10 @@ jobs:
       packages: read
     steps:
       - uses: sigstore/cosign-installer@v3
+      - name: Login registry
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Verifikasi tanda tangan image (Cosign)
         run: |
           IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}"
@@ -312,10 +316,6 @@ jobs:
             --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/pipeline.yml@refs/heads/main$" \
             > /dev/null
           echo "Tanda tangan image terverifikasi." >> "$GITHUB_STEP_SUMMARY"
-      - name: Login registry
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Deploy container staging (port 8081)
         run: |
           IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}"
