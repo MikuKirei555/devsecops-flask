@@ -1,4 +1,4 @@
-"""Aplikasi To-Do List sederhana berbasis Flask."""
+"""Aplikasi To-Do List sederhana berbasis Flask ."""
 import os
 
 from flask import Flask, jsonify, request
