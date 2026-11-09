@@ -172,7 +172,6 @@ Pipeline berjalan otomatis pada `push` ke `main`, setiap `pull_request`, dan sec
 
 | Kebutuhan | Lokasi pengaturan | Nilai |
 |---|---|---|
-| Notifikasi Telegram | Settings → Secrets and variables → Actions → **Secrets** | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID` |
 | Mengaktifkan Stage 4 | Settings → Secrets and variables → Actions → **Variables** | `STAGE4_ENABLED` = `true` |
 | Persetujuan production | Settings → **Environments** | Buat `staging` dan `production`; pada `production` aktifkan *Required reviewers* |
 | Runner deploy | Settings → Actions → **Runners** | Self-hosted runner di VM dengan label `self-hosted`, `linux`, `deploy` (Docker dan curl terpasang) |
