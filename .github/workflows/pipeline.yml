@@ -93,7 +93,7 @@ jobs:
           cache: pip
       - run: pip install -r requirements-dev.txt
       - run: pytest --cov=app --cov-report=term-missing --cov-report=xml --cov-fail-under=80
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage-report
@@ -193,7 +193,7 @@ jobs:
           outputs: type=docker,dest=/tmp/image.tar
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: docker-image
           path: /tmp/image.tar
@@ -342,7 +342,7 @@ jobs:
           mkdir -p zap-out && chmod 777 zap-out
           docker run --rm --network host -v "$(pwd)/zap-out:/zap/wrk/:rw" -t ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py -t "http://localhost:8081" -r zap-report.html -I
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: zap-report
