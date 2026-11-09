@@ -28,7 +28,6 @@ Proyek praktikum DevSecOps: aplikasi REST API sederhana (Flask) yang dilindungi 
 - Skor keamanan berbobot: pipeline berhenti jika skor di bawah 80 atau ada rahasia bocor.
 - Image Docker dipindai (Trivy), dibuatkan SBOM (Syft), dan ditandatangani (Cosign).
 - Deploy ke staging, uji DAST (OWASP ZAP), persetujuan manual, deploy production, *health check*, dan *rollback* otomatis.
-- Notifikasi hasil pipeline ke Telegram dan pembaruan dependensi otomatis lewat Dependabot.
 
 ## Alur Pipeline
 
@@ -58,7 +57,6 @@ flowchart LR
         D3 --> D4[Production + Health Check]
     end
     S1 --> S2 --> S3 --> S4
-    S4 --> N[Notifikasi Telegram]
 ```
 
 ## Tool pada Pipeline
@@ -79,7 +77,6 @@ flowchart LR
 | 3 | **Cosign** | Menandatangani image (keyless, OIDC) di GHCR | Push atau tanda tangan gagal |
 | 4 | **OWASP ZAP** | DAST baseline ke staging | Scan tidak dapat berjalan |
 | 4 | **Health check + rollback** | Memastikan `/health` sehat, kembali ke image sebelumnya jika gagal | Health check production gagal |
-| Semua | **Telegram** | Notifikasi sukses/gagal ke chat Telegram | (tidak memengaruhi hasil pipeline) |
 
 ## Security Score Gate
 
