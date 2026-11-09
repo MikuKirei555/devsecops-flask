@@ -18,7 +18,6 @@ Proyek praktikum DevSecOps: aplikasi REST API sederhana (Flask) yang dilindungi 
 - [Struktur Proyek](#struktur-proyek)
 - [Cara Menjalankan](#cara-menjalankan)
 - [Konfigurasi GitHub Actions](#konfigurasi-github-actions)
-- [Notifikasi Telegram](#notifikasi-telegram)
 - [Dependabot](#dependabot)
 - [Endpoint API](#endpoint-api)
 
@@ -179,16 +178,6 @@ Pipeline berjalan otomatis pada `push` ke `main`, setiap `pull_request`, dan sec
 | Runner deploy | Settings → Actions → **Runners** | Self-hosted runner di VM dengan label `self-hosted`, `linux`, `deploy` (Docker dan curl terpasang) |
 
 Jika `STAGE4_ENABLED` belum `true`, Stage 4 dilewati dan pipeline tetap hijau. Cosign dan push image hanya berjalan pada `push` ke `main`.
-
-## Notifikasi Telegram
-
-Job `notify-telegram` mengirim pesan berisi status (sukses, gagal, atau dibatalkan), repositori, branch, commit, pemicu, daftar job yang gagal, dan tautan ke run.
-
-1. Buat bot lewat [@BotFather](https://t.me/BotFather) dengan perintah `/newbot`, lalu salin token yang diberikan.
-2. Kirim satu pesan ke bot Anda (atau tambahkan bot ke grup), kemudian buka `https://api.telegram.org/bot<TOKEN>/getUpdates` dan catat nilai `chat.id`. Untuk grup, nilainya biasanya negatif.
-3. Simpan token sebagai secret `TELEGRAM_TOKEN` dan ID chat sebagai `TELEGRAM_CHAT_ID`.
-
-Jika secret belum diisi, atau tidak tersedia (misalnya pada PR dari fork atau PR Dependabot), notifikasi dilewati tanpa membuat pipeline gagal.
 
 ## Dependabot
 
